@@ -8,7 +8,11 @@ vi.mock("../../openai", () => ({
   },
 }));
 
-import { calculateThreadQuality } from "../thread-planner";
+import {
+  calculateThreadQuality,
+  calculateRiskScore,
+  isContentClean,
+} from "../thread-planner";
 import { Persona } from "../../types";
 
 function createPersona(username: string): Persona {
@@ -28,13 +32,14 @@ function createComment(
   persona: Persona,
   replyToIndex: number | null,
   minutesAfterPost: number,
-  isAuthorReply = false
+  isAuthorReply = false,
+  text = "Test comment content"
 ) {
   const baseTime = new Date("2025-12-15T10:00:00Z");
   return {
     authorPersona: persona,
     replyToIndex,
-    text: "Test comment content",
+    text,
     scheduledAt: new Date(baseTime.getTime() + minutesAfterPost * 60 * 1000),
     isAuthorReply,
   };
@@ -281,6 +286,484 @@ describe("calculateThreadQuality", () => {
       // Good thread should score significantly higher
       expect(goodScore).toBeGreaterThan(badScore);
       expect(goodScore - badScore).toBeGreaterThan(0.2); // At least 0.2 difference
+    });
+  });
+});
+
+describe("calculateRiskScore", () => {
+  const postAuthorId = "persona-riley_ops";
+  const riley = createPersona("riley_ops");
+  const jordan = createPersona("jordan_consults");
+  const emily = createPersona("emily_econ");
+  const alex = createPersona("alex_sells");
+
+  describe("URL/Link detection (HIGH RISK)", () => {
+    it("high risk for comments containing URLs", () => {
+      const urlThread = [
+        createComment(
+          jordan,
+          null,
+          25,
+          false,
+          "Check out https://slideforge.ai for presentations!"
+        ),
+        createComment(riley, 0, 45, true, "Thanks!"),
+      ];
+
+      const risk = calculateRiskScore(urlThread, postAuthorId);
+
+      // URLs are very risky
+      expect(risk).toBeGreaterThanOrEqual(0.3);
+    });
+
+    it("high risk for posts containing domain names", () => {
+      const thread = [
+        createComment(jordan, null, 25, false, "Great question!"),
+      ];
+
+      const cleanRisk = calculateRiskScore(
+        thread,
+        postAuthorId,
+        "Looking for presentation tools",
+        "slideforge"
+      );
+      const domainRisk = calculateRiskScore(
+        thread,
+        postAuthorId,
+        "Check slideforge.ai for help",
+        "slideforge"
+      );
+
+      expect(domainRisk).toBeGreaterThan(cleanRisk);
+    });
+
+    it("multiple URLs = even higher risk", () => {
+      const multiUrlThread = [
+        createComment(jordan, null, 25, false, "Check www.slideforge.com"),
+        createComment(emily, 0, 45, false, "Also try http://other.io"),
+      ];
+
+      const singleUrlThread = [
+        createComment(jordan, null, 25, false, "Check slideforge.com"),
+        createComment(emily, 0, 45, false, "Good tip!"),
+      ];
+
+      const multiRisk = calculateRiskScore(multiUrlThread, postAuthorId);
+      const singleRisk = calculateRiskScore(singleUrlThread, postAuthorId);
+
+      expect(multiRisk).toBeGreaterThan(singleRisk);
+    });
+  });
+
+  describe("Product mention saturation (ASTROTURFING)", () => {
+    it("low risk when only some comments mention product", () => {
+      const thread = [
+        createComment(jordan, null, 25, false, "I use Slideforge for this"),
+        createComment(emily, 0, 45, false, "Good to know!"),
+        createComment(riley, 1, 55, true, "Thanks for the tip"),
+      ];
+
+      const risk = calculateRiskScore(
+        thread,
+        postAuthorId,
+        "Looking for tools",
+        "slideforge"
+      );
+
+      // Only 1/4 mentions product = low risk
+      expect(risk).toBeLessThan(0.3);
+    });
+
+    it("high risk when 50%+ content mentions product", () => {
+      const thread = [
+        createComment(jordan, null, 25, false, "Slideforge is great for this"),
+        createComment(emily, 0, 45, false, "I also use Slideforge daily"),
+        createComment(riley, 1, 55, true, "Thanks!"),
+      ];
+
+      const risk = calculateRiskScore(
+        thread,
+        postAuthorId,
+        "Looking for tools",
+        "slideforge"
+      );
+
+      // 2/4 = 50% mentions = higher risk
+      expect(risk).toBeGreaterThanOrEqual(0.25);
+    });
+
+    it("very high risk when 75%+ content mentions product", () => {
+      const thread = [
+        createComment(jordan, null, 25, false, "Slideforge is perfect"),
+        createComment(emily, 0, 45, false, "Slideforge saved me hours"),
+        createComment(riley, 1, 55, true, "Slideforge sounds great!"),
+      ];
+
+      const risk = calculateRiskScore(
+        thread,
+        postAuthorId,
+        "I need Slideforge help",
+        "slideforge"
+      );
+
+      // 4/4 = 100% mentions = very high risk
+      expect(risk).toBeGreaterThanOrEqual(0.4);
+    });
+  });
+
+  describe("Coordinated shilling detection", () => {
+    it("high risk when multiple non-OP users recommend same product", () => {
+      const thread = [
+        createComment(jordan, null, 25, false, "I recommend Slideforge"),
+        createComment(
+          emily,
+          0,
+          45,
+          false,
+          "Totally agree, Slideforge is great"
+        ),
+        createComment(riley, 1, 55, true, "Thanks for the tips!"),
+      ];
+
+      const risk = calculateRiskScore(
+        thread,
+        postAuthorId,
+        "Looking for tools",
+        "slideforge"
+      );
+
+      // Two non-OP users recommending same product = coordinated
+      expect(risk).toBeGreaterThanOrEqual(0.4);
+    });
+
+    it("lower risk when only one user mentions product", () => {
+      const thread = [
+        createComment(jordan, null, 25, false, "I recommend Slideforge"),
+        createComment(emily, 0, 45, false, "What's that? Never heard of it."),
+        createComment(riley, 1, 55, true, "Interesting, thanks!"),
+      ];
+
+      const risk = calculateRiskScore(
+        thread,
+        postAuthorId,
+        "Looking for tools",
+        "slideforge"
+      );
+
+      // Only one recommender = less suspicious
+      expect(risk).toBeLessThan(0.4);
+    });
+  });
+
+  describe("OP fishing detection", () => {
+    it("adds risk when OP asks follow-up questions about product", () => {
+      const thread = [
+        createComment(jordan, null, 25, false, "I use Slideforge for this"),
+        createComment(
+          riley,
+          0,
+          45,
+          true,
+          "How does export work? Can you share files easily?"
+        ),
+      ];
+
+      const fishingRisk = calculateRiskScore(
+        thread,
+        postAuthorId,
+        "Looking for tools",
+        "slideforge"
+      );
+
+      // OP asking follow-up questions = fishing for more product info
+      const noQuestionThread = [
+        createComment(jordan, null, 25, false, "I use Slideforge for this"),
+        createComment(riley, 0, 45, true, "Thanks for the tip!"),
+      ];
+
+      const normalRisk = calculateRiskScore(
+        noQuestionThread,
+        postAuthorId,
+        "Looking for tools",
+        "slideforge"
+      );
+
+      expect(fishingRisk).toBeGreaterThan(normalRisk);
+    });
+  });
+
+  describe("Marketing buzzwords detection", () => {
+    it("adds risk for marketing buzzwords", () => {
+      const buzzwordThread = [
+        createComment(
+          jordan,
+          null,
+          25,
+          false,
+          "This tool is a game-changer, absolutely love it!"
+        ),
+      ];
+
+      const normalThread = [
+        createComment(jordan, null, 25, false, "This tool works for me"),
+      ];
+
+      const buzzwordRisk = calculateRiskScore(buzzwordThread, postAuthorId);
+      const normalRisk = calculateRiskScore(normalThread, postAuthorId);
+
+      expect(buzzwordRisk).toBeGreaterThan(normalRisk);
+    });
+  });
+
+  describe("Length check (AI writes too much)", () => {
+    it("adds risk for overly long comments (>50 words)", () => {
+      // This comment has 60+ words - way over the 50 word limit
+      const longComment =
+        "I used Slideforge for a classroom pitch and a small grant deck, it gives really clean layouts and is great for tidying visuals quickly. I still fed my notes and kept control of the sequencing, the tool just expressed the story so I saved evenings aligning headers and polishing slides. This is exactly what I needed for my workflow.";
+      const shortComment = "works great lol";
+
+      const longThread = [createComment(jordan, null, 25, false, longComment)];
+
+      const shortThread = [
+        createComment(jordan, null, 25, false, shortComment),
+      ];
+
+      const longRisk = calculateRiskScore(longThread, postAuthorId);
+      const shortRisk = calculateRiskScore(shortThread, postAuthorId);
+
+      // Long comment should add at least 0.1 risk
+      expect(longRisk).toBeGreaterThanOrEqual(0.1);
+      expect(longRisk).toBeGreaterThan(shortRisk);
+    });
+
+    it("adds risk for overly long post body (>100 words)", () => {
+      const longPost =
+        "I run ops at a small startup so presentation design is my weird superpower, but I'm suddenly on the hook for a pitch deck for a school project and a small grant application and I'm out of my usual tools. I have lesson notes and a rough narrative, and I want something that looks intentional without me spending evenings aligning headers. Anyone using alternatives to traditional slide software that work well for classroom or grant pitches, something that gives clean layouts and helps with hierarchy? Also curious about workflows, specifically whether people get better results feeding notes into AI writing models to craft slide text, or using AI slide generators that try to assemble slides directly.";
+      const shortPost = "Best AI Presentation Maker? Any help appreciated.";
+
+      const thread = [createComment(jordan, null, 25, false, "nice")];
+
+      const longPostRisk = calculateRiskScore(thread, postAuthorId, longPost);
+      const shortPostRisk = calculateRiskScore(thread, postAuthorId, shortPost);
+
+      expect(longPostRisk).toBeGreaterThan(shortPostRisk);
+    });
+  });
+
+  describe("Formal language detection (sounds corporate)", () => {
+    it("adds risk for corporate/formal language", () => {
+      const formalThread = [
+        createComment(
+          jordan,
+          null,
+          25,
+          false,
+          "I run ops at a fast growing startup and need to optimize our workflow hierarchy."
+        ),
+      ];
+
+      const casualThread = [
+        createComment(jordan, null, 25, false, "yea this tool helped me lol"),
+      ];
+
+      const formalRisk = calculateRiskScore(formalThread, postAuthorId);
+      const casualRisk = calculateRiskScore(casualThread, postAuthorId);
+
+      expect(formalRisk).toBeGreaterThan(casualRisk);
+    });
+
+    it("flags 'quick question' pattern", () => {
+      const thread = [
+        createComment(
+          jordan,
+          null,
+          25,
+          false,
+          "Quick question, how do you handle this?"
+        ),
+      ];
+
+      const risk = calculateRiskScore(thread, postAuthorId);
+      expect(risk).toBeGreaterThan(0);
+    });
+  });
+
+  describe("Authenticity markers (casual language reduces risk)", () => {
+    it("reduces risk when content has casual markers like lol", () => {
+      // Both threads have the same formal pattern to create baseline risk
+      // The casual one gets bonus reduction
+      const casualThread = [
+        createComment(
+          jordan,
+          null,
+          25,
+          false,
+          "yea this works lol, helped me optimize stuff"
+        ),
+        createComment(emily, 0, 45, false, "haha same tbh"),
+      ];
+
+      const formalThread = [
+        createComment(
+          jordan,
+          null,
+          25,
+          false,
+          "This works, helped me optimize my workflow."
+        ),
+        createComment(emily, 0, 45, false, "I agree with this assessment."),
+      ];
+
+      const casualRisk = calculateRiskScore(casualThread, postAuthorId);
+      const formalRisk = calculateRiskScore(formalThread, postAuthorId);
+
+      // Casual should have lower risk due to authenticity bonus
+      expect(casualRisk).toBeLessThan(formalRisk);
+    });
+
+    it("recognizes +1 ProductName as authentic", () => {
+      const thread = [createComment(jordan, null, 25, false, "+1 Slideforge")];
+
+      const risk = calculateRiskScore(
+        thread,
+        postAuthorId,
+        undefined,
+        "slideforge"
+      );
+      // Should not be flagged as high risk despite product mention
+      expect(risk).toBeLessThan(0.5);
+    });
+
+    it("recognizes double exclamation as authentic", () => {
+      // Both have some baseline formality, casual gets bonus
+      const casualThread = [
+        createComment(
+          jordan,
+          null,
+          25,
+          false,
+          "Sweet I'll check it out!! gonna optimize my workflow"
+        ),
+      ];
+
+      const formalThread = [
+        createComment(
+          jordan,
+          null,
+          25,
+          false,
+          "Thank you, I will optimize my workflow methodology."
+        ),
+      ];
+
+      const casualRisk = calculateRiskScore(casualThread, postAuthorId);
+      const formalRisk = calculateRiskScore(formalThread, postAuthorId);
+
+      expect(casualRisk).toBeLessThan(formalRisk);
+    });
+  });
+
+  describe("edge cases", () => {
+    it("empty thread has zero risk", () => {
+      const risk = calculateRiskScore([], postAuthorId);
+      expect(risk).toBe(0);
+    });
+
+    it("risk is always between 0 and 1", () => {
+      // Test with various extreme configurations
+      const extremeThread = [
+        createComment(
+          jordan,
+          null,
+          25,
+          false,
+          "https://slideforge.ai is a game-changer revolutionary must-have!"
+        ),
+        createComment(
+          emily,
+          0,
+          45,
+          false,
+          "www.slideforge.com absolutely love it, can't live without it!"
+        ),
+        createComment(
+          alex,
+          1,
+          55,
+          false,
+          "Slideforge.io is incredible, highly recommend Slideforge!"
+        ),
+      ];
+
+      const risk = calculateRiskScore(
+        extremeThread,
+        postAuthorId,
+        "Check Slideforge at slideforge.ai",
+        "slideforge"
+      );
+
+      expect(risk).toBeGreaterThanOrEqual(0);
+      expect(risk).toBeLessThanOrEqual(1);
+    });
+  });
+});
+
+describe("isContentClean", () => {
+  describe("should return false for prohibited content", () => {
+    it("detects https URLs", () => {
+      expect(isContentClean("Check out https://example.com")).toBe(false);
+    });
+
+    it("detects http URLs", () => {
+      expect(isContentClean("Visit http://mysite.org")).toBe(false);
+    });
+
+    it("detects www prefixed URLs", () => {
+      expect(isContentClean("Go to www.company.net")).toBe(false);
+    });
+
+    it("detects .com domains", () => {
+      expect(isContentClean("Try slideforge.com for help")).toBe(false);
+    });
+
+    it("detects .io domains", () => {
+      expect(isContentClean("Check example.io")).toBe(false);
+    });
+
+    it("detects .ai domains", () => {
+      expect(isContentClean("Use slideforge.ai")).toBe(false);
+    });
+
+    it("detects .co domains", () => {
+      expect(isContentClean("Visit company.co")).toBe(false);
+    });
+
+    it("detects .app domains", () => {
+      expect(isContentClean("Download from app.app")).toBe(false);
+    });
+  });
+
+  describe("should return true for clean content", () => {
+    it("allows product names without domains", () => {
+      expect(isContentClean("I use Slideforge for presentations")).toBe(true);
+    });
+
+    it("allows general helpful advice", () => {
+      expect(isContentClean("Try searching for AI presentation tools")).toBe(
+        true
+      );
+    });
+
+    it("detects domains even in casual mentions", () => {
+      expect(isContentClean("I found it on example.com yesterday")).toBe(false);
+    });
+
+    it("allows normal sentences", () => {
+      expect(isContentClean("This helped me save 3 hours of work")).toBe(true);
+    });
+
+    it("allows abbreviations that look like domains but aren't", () => {
+      expect(isContentClean("I work in the A.I. field")).toBe(true);
     });
   });
 });

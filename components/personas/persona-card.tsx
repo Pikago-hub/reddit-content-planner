@@ -21,7 +21,7 @@ export function PersonaCard({
   return (
     <Card className={persona.is_operator ? "border-primary" : ""}>
       <CardContent className="pt-4">
-        <div className="flex justify-between items-start">
+        <div className="flex justify-between items-center">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <p className="font-medium">u/{persona.username}</p>

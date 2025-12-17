@@ -18,40 +18,41 @@ export async function generatePostContent(
   subreddit: Subreddit,
   topic: string,
   angle: string,
-  keywords: Keyword[],
+  _keywords: Keyword[],
   _companyInfo: CompanyInfo
 ): Promise<GeneratedPost> {
-  const keywordTexts = keywords.map((k) => k.keyword_text).join(", ");
-
   const prompt = `You are ${persona.username}, posting on Reddit in r/${subreddit.name}.
 
 YOUR BACKGROUND:
 ${persona.bio || "A regular Reddit user"}
-
-YOUR WRITING STYLE:
-${getVoiceDescription(persona)}
 
 THE POST:
 - Topic: ${topic}
 - Angle/Question: ${angle}
 - Subreddit: r/${subreddit.name}
 
-IMPORTANT GUIDELINES:
-1. Write as if you are genuinely asking for help or starting a discussion
-2. Use your personal experience and background naturally
-3. Do NOT mention any specific product or company name in the original post
-4. The post should attract people searching for: ${keywordTexts}
-5. Keep it concise, Reddit posts shouldn't be essays
-6. Match the tone of r/${subreddit.name}
-7. Sound like a real person, not a marketer
-8. NEVER use dashes (-) anywhere in the text. Use commas, periods, or reword instead. Dashes look too AI-generated.
+CRITICAL STYLE RULES (follow exactly):
+1. Keep it SHORT. Title: 5-10 words. Body: 2-3 sentences MAX, under 50 words total.
+2. Write casually like real Reddit. Use "lol", "!!", "tbh", "sorta", "gonna" etc.
+3. Be imperfect. Use fragments. Skip proper grammar sometimes.
+4. NO corporate speak. Never say "workflow", "optimize", "leverage", "hierarchy".
+5. Do NOT explain your background. Just ask the question directly.
+6. NO product names in the post. You're asking for recommendations.
+7. NO URLs or links ever.
+8. NO dashes. Reword instead.
 
-Generate a Reddit post with a title and body.
+GOOD EXAMPLES:
+- "Best AI Presentation Maker?" / "Just like it says in the title, what is the best AI Presentation Maker? Looking for something that makes slides I can edit. Any help appreciated."
+- "Slideforge vs Canva for slides?" / "I love Canva but trying to automate more of my slides. Heard about Slideforge but unsure if it's any good."
 
-Respond in JSON format:
+BAD EXAMPLES (too long, too formal):
+- "I run ops at a small startup so presentation design is my weird superpower..." (nobody talks like this)
+- "I'm curious about workflows, specifically whether..." (too corporate)
+
+Respond in JSON:
 {
-  "title": "Your post title",
-  "body": "Your post body (2-4 paragraphs max)"
+  "title": "Short punchy title?",
+  "body": "2-3 casual sentences max"
 }`;
 
   try {
@@ -71,13 +72,15 @@ Respond in JSON format:
     const content = response.output_text || "{}";
 
     try {
-      const parsed = JSON.parse(content);
+      const fixed = fixNewlinesInJsonStrings(content);
+      const parsed = JSON.parse(fixed);
       return {
         title: parsed.title || topic,
         body: parsed.body || angle,
       };
     } catch (parseError) {
-      console.error("JSON Parse Error (Post):", parseError, content);
+      console.error("JSON Parse Error (Post):", parseError);
+      console.error("Raw content:", JSON.stringify(content));
       throw parseError;
     }
   } catch (error) {
@@ -111,40 +114,40 @@ export async function generateCommentContent(
 
   const productMention = isAuthorReply
     ? "You should NOT mention any product - just thank them or ask a follow-up question"
-    : `You can naturally mention ${companyName} if it fits your experience, but don't be pushy. A brief mention is fine.`;
+    : `You can naturally mention "${companyName}" by name only if it fits your experience, but don't be pushy. A brief mention is fine. NEVER include a URL or link to the product.`;
 
-  const intentGuidance = intent
-    ? `\nYOUR GOAL FOR THIS COMMENT: ${intent}`
-    : "";
+  const intentGuidance = intent ? `\nYOUR GOAL: ${intent}` : "";
 
-  const prompt = `You are ${persona.username}, commenting on a Reddit post.
-
-YOUR BACKGROUND:
-${persona.bio || "A regular Reddit user"}
-
-YOUR WRITING STYLE:
-${getVoiceDescription(persona)}
+  const prompt = `You are ${persona.username}, commenting on Reddit.
 ${intentGuidance}
 
-THE POST:
-Title: ${postTitle}
-Body: ${postBody}
-
+POST: "${postTitle}"
 ${context}
 
-GUIDELINES:
-1. Write a natural Reddit comment in your voice
-2. Share from your genuine experience
-3. ${productMention}
-4. Keep it concise (1-3 sentences typically)
-5. Sound helpful, not salesy
-6. ${isAuthorReply ? "As the original poster, you're responding to helpful advice" : "You're sharing your experience or opinion"}
-7. NEVER use dashes (-) anywhere in the text. Use commas, periods, or reword instead. Dashes look too AI-generated.
-${intent ? `8. Make sure your comment achieves this goal: ${intent}` : ""}
+CRITICAL RULES:
+1. MAX 1-2 sentences. Under 25 words is ideal. Real Reddit comments are SHORT.
+2. Use casual language: "lol", "!!", "yea", "tbh", "sorta" etc.
+3. Fragments OK. Skip grammar rules sometimes.
+4. ${productMention}
+5. NO corporate words: "workflow", "leverage", "hierarchy", "functionality"
+6. NO URLs ever.
+7. NO dashes.
 
-Respond in JSON format:
+GOOD EXAMPLES (copy this style):
+- "+1 Slideforge"
+- "Sweet I'll check it out!!"
+- "Yea Claude's slide output always looks really funky lol"
+- "I hate picking fonts lol. Slideforge's defaults save my sanity."
+- "Same here. Claude is fine for internal notes but for anything customer facing we use Slideforge."
+
+BAD EXAMPLES (too long, too formal):
+- "I used Slideforge for a classroom pitch and a small grant deck, it gives really clean layouts and is great for tidying visuals quickly." (way too long)
+- "Thanks, really helpful. Which template did you use?" (too polite/formal)
+- "Totally agree. I used Slideforge templates and they saved a ton of time" (robotic)
+
+Respond in JSON:
 {
-  "text": "Your comment text"
+  "text": "short casual comment"
 }`;
 
   try {
@@ -164,12 +167,14 @@ Respond in JSON format:
     const content = response.output_text || "{}";
 
     try {
-      const parsed = JSON.parse(content);
+      const fixed = fixNewlinesInJsonStrings(content);
+      const parsed = JSON.parse(fixed);
       return {
         text: parsed.text || "Thanks for sharing!",
       };
     } catch (parseError) {
-      console.error("JSON Parse Error (Comment):", parseError, content);
+      console.error("JSON Parse Error (Comment):", parseError);
+      console.error("Raw content:", JSON.stringify(content));
       throw parseError;
     }
   } catch (error) {
@@ -180,8 +185,24 @@ Respond in JSON format:
   }
 }
 
-function getVoiceDescription(_persona: Persona): string {
-  return "Write authentically based on the background and personality in your bio. Let your voice emerge naturally from who you are.";
+function fixNewlinesInJsonStrings(content: string): string {
+  let result = "";
+  let inString = false;
+
+  for (let i = 0; i < content.length; i++) {
+    const char = content[i];
+
+    if (char === '"' && (i === 0 || content[i - 1] !== "\\")) {
+      inString = !inString;
+      result += char;
+    } else if (char === "\n" && inString) {
+      result += "\\n";
+    } else {
+      result += char;
+    }
+  }
+
+  return result;
 }
 
 export function generateDedupeHash(

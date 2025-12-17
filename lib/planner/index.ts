@@ -11,7 +11,11 @@ import { selectSubredditsForWeek } from "./subreddit-selector";
 import { selectPostAuthor, selectCommenters } from "./persona-selector";
 import { generateTopic, recordTopicUsage } from "./topic-generator";
 import { generatePostContent, generateDedupeHash } from "./content-generator";
-import { planCommentThread, calculateThreadQuality } from "./thread-planner";
+import {
+  planCommentThread,
+  calculateThreadQuality,
+  calculateRiskScore,
+} from "./thread-planner";
 
 interface GenerationResult {
   weeklyPlanId: string;
@@ -221,14 +225,21 @@ export async function generateWeeklyCalendar(
         companyInfo
       );
 
+      const productName = companyInfo.website?.replace(/\..*/, "") || "";
       const threadQuality = calculateThreadQuality(
         threadPlan.comments,
         authorSelection.persona.id
       );
+      const threadRisk = calculateRiskScore(
+        threadPlan.comments,
+        authorSelection.persona.id,
+        postContent.body,
+        productName
+      );
 
       await supabase
         .from("planned_posts")
-        .update({ quality_score: threadQuality })
+        .update({ quality_score: threadQuality, risk_score: threadRisk })
         .eq("id", post.id);
 
       const commentIdMap = new Map<number, string>();
@@ -566,21 +577,28 @@ export async function generateContentForPlan(
         companyInfo
       );
 
+      const productName = companyInfo.website?.replace(/\..*/, "") || "";
       const threadQuality = calculateThreadQuality(
         threadPlan.comments,
         authorSelection.persona.id
+      );
+      const threadRisk = calculateRiskScore(
+        threadPlan.comments,
+        authorSelection.persona.id,
+        postContent.body,
+        productName
       );
 
       onProgress?.({
         step: "generating_comments",
         postIndex: i + 1,
         subredditName: subreddit.name,
-        message: `📊 Thread quality score: ${Math.round(threadQuality * 100)}%`,
+        message: `📊 Quality: ${Math.round(threadQuality * 100)}% | Risk: ${Math.round(threadRisk * 100)}%`,
       });
 
       await supabase
         .from("planned_posts")
-        .update({ quality_score: threadQuality })
+        .update({ quality_score: threadQuality, risk_score: threadRisk })
         .eq("id", post.id);
 
       const commentIdMap = new Map<number, string>();

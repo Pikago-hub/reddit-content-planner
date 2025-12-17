@@ -282,8 +282,28 @@ export default function CalendarViewPage({
                               ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
                               : ""
                         }
+                        title="Thread structure quality"
                       >
-                        {Math.round(post.quality_score * 100)}%
+                        Q: {Math.round(post.quality_score * 100)}%
+                      </Badge>
+                      <Badge
+                        variant={
+                          post.risk_score <= 0.3
+                            ? "default"
+                            : post.risk_score <= 0.5
+                              ? "secondary"
+                              : "destructive"
+                        }
+                        className={
+                          post.risk_score <= 0.3
+                            ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                            : post.risk_score <= 0.5
+                              ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                              : ""
+                        }
+                        title="Detection risk (lower is better)"
+                      >
+                        R: {Math.round(post.risk_score * 100)}%
                       </Badge>
                     </div>
                   </div>
@@ -326,7 +346,7 @@ export default function CalendarViewPage({
             <CardTitle>Calendar Summary</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
               <div>
                 <p className="text-muted-foreground">Total Posts</p>
                 <p className="text-xl font-bold">{posts.length}</p>
@@ -343,10 +363,51 @@ export default function CalendarViewPage({
               </div>
               <div>
                 <p className="text-muted-foreground">Avg Quality</p>
-                <p className="text-xl font-bold">
+                <p
+                  className={`text-xl font-bold ${
+                    posts.length > 0 &&
+                    posts.reduce((sum, p) => sum + p.quality_score, 0) /
+                      posts.length >=
+                      0.7
+                      ? "text-green-600"
+                      : posts.length > 0 &&
+                          posts.reduce((sum, p) => sum + p.quality_score, 0) /
+                            posts.length >=
+                            0.5
+                        ? "text-yellow-600"
+                        : "text-red-600"
+                  }`}
+                >
                   {posts.length > 0
                     ? Math.round(
                         (posts.reduce((sum, p) => sum + p.quality_score, 0) /
+                          posts.length) *
+                          100
+                      )
+                    : 0}
+                  %
+                </p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Avg Risk</p>
+                <p
+                  className={`text-xl font-bold ${
+                    posts.length > 0 &&
+                    posts.reduce((sum, p) => sum + p.risk_score, 0) /
+                      posts.length <=
+                      0.3
+                      ? "text-green-600"
+                      : posts.length > 0 &&
+                          posts.reduce((sum, p) => sum + p.risk_score, 0) /
+                            posts.length <=
+                            0.5
+                        ? "text-yellow-600"
+                        : "text-red-600"
+                  }`}
+                >
+                  {posts.length > 0
+                    ? Math.round(
+                        (posts.reduce((sum, p) => sum + p.risk_score, 0) /
                           posts.length) *
                           100
                       )
