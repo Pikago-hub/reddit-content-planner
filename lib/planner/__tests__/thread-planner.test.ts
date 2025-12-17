@@ -12,6 +12,7 @@ import {
   calculateThreadQuality,
   calculateRiskScore,
   isContentClean,
+  countDashes,
 } from "../thread-planner";
 import { Persona } from "../../types";
 
@@ -764,6 +765,112 @@ describe("isContentClean", () => {
 
     it("allows abbreviations that look like domains but aren't", () => {
       expect(isContentClean("I work in the A.I. field")).toBe(true);
+    });
+  });
+});
+
+describe("countDashes", () => {
+  describe("detects AI-like dash patterns", () => {
+    it("detects em-dashes (—)", () => {
+      expect(countDashes(["This tool — which I love — is great"])).toBe(2);
+    });
+
+    it("detects en-dashes (–)", () => {
+      expect(countDashes(["Pages 1–10 are the best"])).toBe(1);
+    });
+
+    it("detects spaced hyphens ( - )", () => {
+      expect(countDashes(["This tool - the best one - works"])).toBe(2);
+    });
+
+    it("detects double hyphens (--)", () => {
+      expect(countDashes(["I tried it -- and it worked"])).toBe(1);
+    });
+
+    it("detects mixed dash types", () => {
+      expect(countDashes(["This — is great - really -- amazing"])).toBe(3);
+    });
+  });
+
+  describe("does NOT penalize normal hyphens", () => {
+    it("allows hyphenated words like 'well-known'", () => {
+      expect(countDashes(["It's a well-known fact"])).toBe(0);
+    });
+
+    it("allows compound words", () => {
+      expect(
+        countDashes(["I use AI-powered tools for my day-to-day work"])
+      ).toBe(0);
+    });
+
+    it("allows numbers with hyphens", () => {
+      expect(countDashes(["Call 1-800-555-1234"])).toBe(0);
+    });
+  });
+
+  describe("risk score penalizes dashes", () => {
+    const postAuthorId = "persona-riley_ops";
+    const riley = {
+      id: "persona-riley_ops",
+      campaign_id: "campaign-1",
+      username: "riley_ops",
+      bio: "I do ops",
+      is_active: true,
+      is_operator: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    it("adds risk for content with em-dashes", () => {
+      const dashThread = [
+        {
+          authorPersona: riley,
+          text: "This tool — honestly — saved me hours",
+          replyToIndex: null,
+          scheduledAt: new Date(),
+          isAuthorReply: false,
+        },
+      ];
+      const cleanThread = [
+        {
+          authorPersona: riley,
+          text: "This tool honestly saved me hours",
+          replyToIndex: null,
+          scheduledAt: new Date(),
+          isAuthorReply: false,
+        },
+      ];
+
+      const dashRisk = calculateRiskScore(dashThread, postAuthorId);
+      const cleanRisk = calculateRiskScore(cleanThread, postAuthorId);
+
+      expect(dashRisk).toBeGreaterThan(cleanRisk);
+    });
+
+    it("higher risk for multiple dashes", () => {
+      const manyDashes = [
+        {
+          authorPersona: riley,
+          text: "This — I mean — really — is amazing",
+          replyToIndex: null,
+          scheduledAt: new Date(),
+          isAuthorReply: false,
+        },
+      ];
+      const oneDash = [
+        {
+          authorPersona: riley,
+          text: "This — is amazing",
+          replyToIndex: null,
+          scheduledAt: new Date(),
+          isAuthorReply: false,
+        },
+      ];
+
+      const manyRisk = calculateRiskScore(manyDashes, postAuthorId);
+      const oneRisk = calculateRiskScore(oneDash, postAuthorId);
+
+      expect(manyRisk).toBeGreaterThan(oneRisk);
     });
   });
 });

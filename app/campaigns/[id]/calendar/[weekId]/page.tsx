@@ -63,9 +63,9 @@ export default function CalendarViewPage({
     try {
       const result = await regenerateMutation.mutateAsync();
       if (result.weeklyPlanId) {
-        toast.success(
-          `Regenerated ${result.postsGenerated} posts and ${result.commentsGenerated} comments`
-        );
+        // Navigate to the new plan page - SSE streaming will auto-start
+        // since the new plan has status: "generating"
+        toast.info("Regenerating calendar...");
         router.push(`/campaigns/${campaignId}/calendar/${result.weeklyPlanId}`);
       }
     } catch (error) {

@@ -469,6 +469,26 @@ function isContentTooLong(text: string, isPost: boolean): boolean {
 }
 
 /**
+ * Count dashes in text that indicate AI-generated content.
+ * Detects: em-dashes (—), en-dashes (–), and spaced hyphens ( - )
+ * Does NOT penalize normal hyphenated words like "well-known"
+ */
+export function countDashes(texts: string[]): number {
+  let count = 0;
+  for (const text of texts) {
+    // Em-dash (—) - very common in AI text
+    count += (text.match(/—/g) || []).length;
+    // En-dash (–) - also common in AI text
+    count += (text.match(/–/g) || []).length;
+    // Spaced hyphen ( - ) used as dash punctuation, not in compound words
+    count += (text.match(/\s-\s/g) || []).length;
+    // Double hyphen (--) used as dash
+    count += (text.match(/--/g) || []).length;
+  }
+  return count;
+}
+
+/**
  * Calculate RISK score - measures how likely content will be detected as AI/promotional
  *
  * Higher score = MORE risky (more likely to be flagged as astroturfing)
@@ -544,6 +564,14 @@ export function calculateRiskScore(
     risk += 0.2; // Very formal
   } else if (totalFormalPatterns >= 1) {
     risk += 0.1 * totalFormalPatterns;
+  }
+
+  // === DASH DETECTION (AI-generated content often uses dashes) ===
+  const dashCount = countDashes(allTexts);
+  if (dashCount >= 3) {
+    risk += 0.25; // Multiple dashes = very AI-like
+  } else if (dashCount >= 1) {
+    risk += 0.1 * dashCount;
   }
 
   // === AUTHENTICITY BONUS (casual language reduces risk) ===

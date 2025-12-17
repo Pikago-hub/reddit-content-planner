@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { generateWeeklyCalendar } from "@/lib/planner";
 
 export async function POST(
   _request: NextRequest,
@@ -10,7 +9,7 @@ export async function POST(
 
   const { data: campaign, error: campaignError } = await supabase
     .from("campaigns")
-    .select("id")
+    .select("id, posts_per_week")
     .eq("id", campaignId)
     .single();
 
@@ -81,6 +80,7 @@ export async function POST(
   }
 
   try {
+    // Delete existing posts and comments
     const { data: existingPosts } = await supabase
       .from("planned_posts")
       .select("id")
@@ -98,18 +98,41 @@ export async function POST(
         .eq("weekly_plan_id", weeklyPlanId);
     }
 
+    // Delete the old weekly plan
     await supabase.from("weekly_plans").delete().eq("id", weeklyPlanId);
 
+    // Create a new weekly plan with "generating" status (same week start date)
     const weekStartDate = new Date(weeklyPlan.week_start_date + "T00:00:00Z");
-    const planResult = await generateWeeklyCalendar(campaignId, weekStartDate);
+    const weekStartDateStr = weekStartDate.toISOString().split("T")[0];
 
+    const { data: newPlan, error: newPlanError } = await supabase
+      .from("weekly_plans")
+      .insert({
+        campaign_id: campaignId,
+        week_start_date: weekStartDateStr,
+        status: "generating",
+        plan_json: {
+          created_at: new Date().toISOString(),
+          total_posts: campaign.posts_per_week,
+          regenerated_from: weeklyPlanId,
+        },
+      })
+      .select()
+      .single();
+
+    if (newPlanError || !newPlan) {
+      return NextResponse.json(
+        { error: `Failed to create weekly plan: ${newPlanError?.message}` },
+        { status: 500 }
+      );
+    }
+
+    // Return immediately - frontend will start SSE streaming
     return NextResponse.json({
       success: true,
-      weeklyPlanId: planResult.weeklyPlanId,
-      weekStartDate: weekStartDate.toISOString().split("T")[0],
-      postsGenerated: planResult.postsGenerated,
-      commentsGenerated: planResult.commentsGenerated,
-      errors: planResult.errors,
+      weeklyPlanId: newPlan.id,
+      weekStartDate: weekStartDateStr,
+      totalPosts: campaign.posts_per_week,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

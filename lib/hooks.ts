@@ -209,8 +209,12 @@ export function useGenerateNextWeek(campaignId: string) {
   });
 }
 
-interface RegenerateCalendarResponse extends GenerateCalendarResponse {
+interface RegenerateCalendarResponse {
+  success: boolean;
   weeklyPlanId?: string;
+  weekStartDate?: string;
+  totalPosts?: number;
+  error?: string;
 }
 
 export function useDeleteWeeklyPlan(campaignId: string) {
