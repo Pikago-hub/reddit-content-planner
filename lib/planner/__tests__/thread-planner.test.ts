@@ -289,6 +289,127 @@ describe("calculateThreadQuality", () => {
       expect(goodScore - badScore).toBeGreaterThan(0.2); // At least 0.2 difference
     });
   });
+
+  describe("comment length variety", () => {
+    it("gives bonus for varied comment lengths (natural)", () => {
+      // Natural thread: mix of short and longer comments (like real Reddit)
+      const variedThread = [
+        createComment(jordan, null, 20, false, "+1 Slideforge"), // 2 words - super short
+        createComment(
+          emily,
+          0,
+          35,
+          false,
+          "I use it for my consulting decks all the time, really speeds things up"
+        ), // 13 words
+        createComment(riley, 1, 50, true, "Sweet thanks!!"), // 2 words
+      ];
+
+      // Uniform thread: all comments similar length
+      const uniformThread = [
+        createComment(
+          jordan,
+          null,
+          20,
+          false,
+          "I really like using this tool for presentations"
+        ), // 8 words
+        createComment(
+          emily,
+          0,
+          35,
+          false,
+          "Same here it works pretty well for me"
+        ), // 8 words
+        createComment(riley, 1, 50, true, "Thanks for the tip I will try it"), // 8 words
+      ];
+
+      const variedScore = calculateThreadQuality(variedThread, postAuthorId);
+      const uniformScore = calculateThreadQuality(uniformThread, postAuthorId);
+
+      // Varied lengths should score higher
+      expect(variedScore).toBeGreaterThan(uniformScore);
+    });
+
+    it("penalizes when all comments are similar length (looks coordinated)", () => {
+      // All comments are ~8 words - suspiciously uniform
+      const uniformThread = [
+        createComment(
+          jordan,
+          null,
+          20,
+          false,
+          "I really like using this tool for slides"
+        ),
+        createComment(
+          emily,
+          0,
+          35,
+          false,
+          "Same here it works well for my needs"
+        ),
+        createComment(riley, 1, 50, true, "Thanks for the tip I will try it"),
+      ];
+
+      // Natural thread with varied lengths
+      const variedThread = [
+        createComment(jordan, null, 20, false, "+1 Slideforge"), // 2 words
+        createComment(
+          emily,
+          0,
+          35,
+          false,
+          "I use it for my consulting decks all the time really speeds things up"
+        ), // 14 words
+        createComment(riley, 1, 50, true, "Sweet!!"), // 1 word
+      ];
+
+      const uniformScore = calculateThreadQuality(uniformThread, postAuthorId);
+      const variedScore = calculateThreadQuality(variedThread, postAuthorId);
+
+      // Varied thread should score higher due to length variety bonus
+      expect(variedScore).toBeGreaterThan(uniformScore);
+    });
+
+    it("gives bonus when at least one comment is super short (like +1)", () => {
+      const withShort = [
+        createComment(jordan, null, 20, false, "+1 Slideforge"), // Super short
+        createComment(
+          emily,
+          0,
+          35,
+          false,
+          "Yeah it's been really helpful for my work"
+        ),
+      ];
+
+      const withoutShort = [
+        createComment(
+          jordan,
+          null,
+          20,
+          false,
+          "I think Slideforge is pretty good"
+        ), // 6 words
+        createComment(
+          emily,
+          0,
+          35,
+          false,
+          "Yeah it's been really helpful for my work"
+        ), // 8 words
+      ];
+
+      const withShortScore = calculateThreadQuality(withShort, postAuthorId);
+      const withoutShortScore = calculateThreadQuality(
+        withoutShort,
+        postAuthorId
+      );
+
+      // Thread with super short comment should score higher
+      expect(withShortScore).toBeGreaterThan(withoutShortScore);
+    });
+  });
 });
 
 describe("calculateRiskScore", () => {

@@ -32,7 +32,7 @@ THE POST:
 - Subreddit: r/${subreddit.name}
 
 CRITICAL STYLE RULES (follow exactly):
-1. Keep it SHORT. Title: 5-10 words. Body: 2-3 sentences MAX, under 50 words total.
+1. Keep it SHORT. Title: 5-10 words. Body: 1-2 sentences MAX, under 30 words total.
 2. Write casually like real Reddit. Use "lol", "!!", "tbh", "sorta", "gonna" etc.
 3. Be imperfect. Use fragments. Skip proper grammar sometimes.
 4. NO corporate speak. Never say "workflow", "optimize", "leverage", "hierarchy".
@@ -93,9 +93,34 @@ Respond in JSON:
 }
 
 /**
+ * Length styles for comment variety
+ */
+type CommentLength = "ultra_short" | "short" | "medium";
+
+const LENGTH_GUIDANCE: Record<CommentLength, string> = {
+  ultra_short: `LENGTH: Ultra short (1-5 words). Just "+1 ProductName" or "Same!!" or "This ^" or "lol yea"`,
+  short: `LENGTH: Short (5-10 words). One quick sentence or fragment.`,
+  medium: `LENGTH: Medium (10-18 words). One full sentence, maybe two short ones.`,
+};
+
+const LENGTH_EXAMPLES: Record<CommentLength, string[]> = {
+  ultra_short: ["+1 Slideforge", "Same!!", "This ^", "lol yea", "^ seconded"],
+  short: [
+    "Sweet I'll check it out!!",
+    "Yea it's pretty solid tbh",
+    "I use it for decks lol",
+  ],
+  medium: [
+    "Yea Claude's slide output always looks really funky lol",
+    "I hate picking fonts lol. Slideforge's defaults save my sanity.",
+  ],
+};
+
+/**
  * Generates a comment in the persona's voice
  *
  * @param intent - Optional intent from the orchestrator describing what angle/purpose this comment should have
+ * @param commentIndex - Position in the thread (0, 1, 2...) to vary comment lengths
  */
 export async function generateCommentContent(
   persona: Persona,
@@ -104,7 +129,8 @@ export async function generateCommentContent(
   parentComment: string | null,
   isAuthorReply: boolean,
   companyInfo: CompanyInfo,
-  intent?: string
+  intent?: string,
+  commentIndex: number = 0
 ): Promise<GeneratedComment> {
   const companyName = companyInfo.website?.replace(/\..*/, "") || "the tool";
 
@@ -118,6 +144,20 @@ export async function generateCommentContent(
 
   const intentGuidance = intent ? `\nYOUR GOAL: ${intent}` : "";
 
+  // Vary comment lengths for natural thread appearance
+  // Pattern: first comment medium, second ultra-short or short, third varies
+  const lengthPatterns: CommentLength[][] = [
+    ["medium", "ultra_short", "short"],
+    ["short", "ultra_short", "medium"],
+    ["medium", "short", "ultra_short"],
+  ];
+  const patternIndex = Math.floor(Math.random() * lengthPatterns.length);
+  const pattern = lengthPatterns[patternIndex];
+  const targetLength = pattern[commentIndex % pattern.length];
+
+  const lengthRule = LENGTH_GUIDANCE[targetLength];
+  const examples = LENGTH_EXAMPLES[targetLength];
+
   const prompt = `You are ${persona.username}, commenting on Reddit.
 ${intentGuidance}
 
@@ -125,7 +165,7 @@ POST: "${postTitle}"
 ${context}
 
 CRITICAL RULES:
-1. MAX 1-2 sentences. Under 25 words is ideal. Real Reddit comments are SHORT.
+1. ${lengthRule}
 2. Use casual language: "lol", "!!", "yea", "tbh", "sorta" etc.
 3. Fragments OK. Skip grammar rules sometimes.
 4. ${productMention}
@@ -133,21 +173,16 @@ CRITICAL RULES:
 6. NO URLs ever.
 7. NO dashes.
 
-GOOD EXAMPLES (copy this style):
-- "+1 Slideforge"
-- "Sweet I'll check it out!!"
-- "Yea Claude's slide output always looks really funky lol"
-- "I hate picking fonts lol. Slideforge's defaults save my sanity."
-- "Same here. Claude is fine for internal notes but for anything customer facing we use Slideforge."
+GOOD EXAMPLES for this length:
+${examples.map((e) => `- "${e}"`).join("\n")}
 
-BAD EXAMPLES (too long, too formal):
-- "I used Slideforge for a classroom pitch and a small grant deck, it gives really clean layouts and is great for tidying visuals quickly." (way too long)
+BAD (too long/formal):
+- "I used Slideforge for a classroom pitch and a small grant deck, it gives really clean layouts" (way too long)
 - "Thanks, really helpful. Which template did you use?" (too polite/formal)
-- "Totally agree. I used Slideforge templates and they saved a ton of time" (robotic)
 
 Respond in JSON:
 {
-  "text": "short casual comment"
+  "text": "your comment here"
 }`;
 
   try {

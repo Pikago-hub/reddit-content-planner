@@ -255,7 +255,8 @@ export async function planCommentThread(
       parentComment,
       isAuthorReply,
       companyInfo,
-      planned.intent
+      planned.intent,
+      i // Pass comment index for length variety
     );
 
     comments.push({
@@ -461,11 +462,12 @@ function countWords(text: string): number {
 
 /**
  * Check if text is too long for natural Reddit content
- * Posts should be < 100 words, comments < 50 words
+ * Posts should be < 80 words, comments < 30 words
+ * Normal people don't write essays on Reddit lol
  */
 function isContentTooLong(text: string, isPost: boolean): boolean {
   const wordCount = countWords(text);
-  return isPost ? wordCount > 100 : wordCount > 50;
+  return isPost ? wordCount > 80 : wordCount > 30;
 }
 
 /**
@@ -705,6 +707,28 @@ export function calculateThreadQuality(
     }
     if (count > 2) {
       score -= 0.15;
+    }
+  }
+
+  // === COMMENT LENGTH VARIETY ===
+  if (comments.length >= 2) {
+    const lengths = comments.map((c) => countWords(c.text));
+    const avgLength = lengths.reduce((a, b) => a + b, 0) / lengths.length;
+
+    const variance =
+      lengths.reduce((sum, len) => sum + Math.pow(len - avgLength, 2), 0) /
+      lengths.length;
+    const stdDev = Math.sqrt(variance);
+
+    if (stdDev >= 5) {
+      score += 0.1;
+    } else if (stdDev < 3) {
+      score -= 0.15;
+    }
+
+    const hasSuperShort = lengths.some((len) => len <= 5);
+    if (hasSuperShort) {
+      score += 0.05;
     }
   }
 
